@@ -51,6 +51,11 @@ Page({
   onUnload: function() {
     // 页面关闭
   },
+  goInvite(){
+    wx.navigateTo({
+      url: "/pages/auth/invite/invite"
+    });
+  },
   goLogin() {
     if (!this.data.hasLogin) {
       wx.navigateTo({

@@ -8,6 +8,7 @@ Page({
     password: '',
     confirmPassword: '',
     mobile: '',
+    invite: '',
     code: ''
   },
   onLoad: function(options) {
@@ -86,6 +87,7 @@ Page({
         password: that.data.password,
         mobile: that.data.mobile,
         code: that.data.code,
+        invite:that.data.invite,
         wxCode: wxCode
       },
       method: 'POST',
@@ -198,6 +200,18 @@ Page({
       code: e.detail.value
     });
   },
+  bindInviteInput: function (e) {
+    if (e.detail.value.length > 6) {
+      wx.showModal({
+        title: '邀请码错误',
+        content: '请更正',
+        showCancel: false
+      });
+    }
+    this.setData({
+      invite: e.detail.value
+    });
+  },
   clearInput: function(e) {
     switch (e.currentTarget.id) {
       case 'clear-username':
@@ -220,6 +234,11 @@ Page({
           mobile: ''
         });
         break;
+      case 'clear-invite':
+        this.setData({
+          invite: ''
+        });
+        break;  
       case 'clear-code':
         this.setData({
           code: ''

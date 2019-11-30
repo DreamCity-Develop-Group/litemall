@@ -29,10 +29,16 @@ public class LitemallUserService {
         return userVo;
     }
 
-    public LitemallUser queryByOid(String openId) {
+    public LitemallUser queryByOid(String openid) {
         LitemallUserExample example = new LitemallUserExample();
-        example.or().andWeixinOpenidEqualTo(openId).andDeletedEqualTo(false);
+        example.or().andWeixinOpenidEqualTo(openid).andDeletedEqualTo(false);
         return userMapper.selectOneByExample(example);
+    }
+
+    public List<LitemallUser> queryByOpenid(String openid) {
+        LitemallUserExample example = new LitemallUserExample();
+        example.or().andWeixinOpenidEqualTo(openid).andDeletedEqualTo(false);
+        return userMapper.selectByExample(example);
     }
 
     public LitemallUser queryByInvite(String invite) {
@@ -97,11 +103,7 @@ public class LitemallUserService {
         return userMapper.selectByExample(example);
     }
 
-    public List<LitemallUser> queryByOpenid(String openid) {
-        LitemallUserExample example = new LitemallUserExample();
-        example.or().andWeixinOpenidEqualTo(openid).andDeletedEqualTo(false);
-        return userMapper.selectByExample(example);
-    }
+
 
     public void deleteById(Integer id) {
         userMapper.logicalDeleteByPrimaryKey(id);

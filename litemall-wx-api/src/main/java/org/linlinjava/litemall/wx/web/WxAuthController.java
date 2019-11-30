@@ -12,9 +12,12 @@ import org.linlinjava.litemall.core.util.JacksonUtil;
 import org.linlinjava.litemall.core.util.RegexUtil;
 import org.linlinjava.litemall.core.util.ResponseUtil;
 import org.linlinjava.litemall.core.util.bcrypt.BCryptPasswordEncoder;
+import org.linlinjava.litemall.db.domain.GameRule;
+import org.linlinjava.litemall.db.domain.GameRuleItem;
 import org.linlinjava.litemall.db.domain.GameTree;
 import org.linlinjava.litemall.db.domain.LitemallUser;
 import org.linlinjava.litemall.db.service.CouponAssignService;
+import org.linlinjava.litemall.db.service.GameRuleService;
 import org.linlinjava.litemall.db.service.GameTreeService;
 import org.linlinjava.litemall.db.service.LitemallUserService;
 import org.linlinjava.litemall.wx.annotation.LoginUser;
@@ -30,10 +33,12 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.transform.Result;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.linlinjava.litemall.wx.util.WxResponseCode.*;
 
@@ -45,6 +50,9 @@ import static org.linlinjava.litemall.wx.util.WxResponseCode.*;
 @Validated
 public class WxAuthController {
     private final Log logger = LogFactory.getLog(WxAuthController.class);
+
+    private final String PlAYER_FLAG = "PlAYER_LEVEL";
+    private final String PlAYER_UPGRADE = "PUSHER_CHANNEL";
 
     @Autowired
     private LitemallUserService userService;
@@ -60,6 +68,9 @@ public class WxAuthController {
 
     @Autowired
     private GameTreeService treeService;
+
+    @Autowired
+    private GameRuleService gameRuleService;
 
     /**
      * 账号登录
@@ -143,6 +154,7 @@ public class WxAuthController {
 
         LitemallUser user = userService.queryByOid(openId);
         if (user == null) {
+            String invite = CharUtil.getRandomString(6);
             user = new LitemallUser();
             user.setUsername(openId);
             user.setPassword(openId);
@@ -152,6 +164,7 @@ public class WxAuthController {
             user.setGender(userInfo.getGender());
             user.setUserLevel((byte) 0);
             user.setStatus((byte) 0);
+            user.setInvite(invite);
             user.setLastLoginTime(LocalDateTime.now());
             user.setLastLoginIp(IpUtil.getIpAddr(request));
             user.setSessionKey(sessionKey);
@@ -181,7 +194,7 @@ public class WxAuthController {
 
     /**
      * 请求注册验证码
-     *
+     * <p>
      * TODO
      * 这里需要一定机制防止短信验证码被滥用
      *
@@ -202,7 +215,7 @@ public class WxAuthController {
             return ResponseUtil.fail(AUTH_CAPTCHA_UNSUPPORT, "小程序后台验证码服务不支持");
         }
         String code = CharUtil.getRandomNum(6);
-        logger.info("regCaptcha Code is{"+code+"}");
+        logger.info("regCaptcha Code is{" + code + "}");
 
 
         notifyService.notifySmsTemplate(phoneNumber, NotifyType.CAPTCHA, new String[]{code});
@@ -213,6 +226,167 @@ public class WxAuthController {
         }
 
         return ResponseUtil.ok();
+    }
+
+    @PostMapping("register/invite")
+    public Object invite(@RequestBody String body, HttpServletRequest request) {
+        String mobile = JacksonUtil.parseString(body, "mobile");
+        String code = JacksonUtil.parseString(body, "code");
+        String invited = JacksonUtil.parseString(body, "invite");
+        // 如果是小程序注册，则必须非空
+        // 其他情况，可以为空
+        String wxCode = JacksonUtil.parseString(body, "wxCode");
+
+
+        List<LitemallUser> userList = userService.queryByMobile(mobile);
+        if (userList.size() > 0) {
+            return ResponseUtil.fail(AUTH_MOBILE_REGISTERED, "手机号已注册");
+        }
+        if (!RegexUtil.isMobileExact(mobile)) {
+            return ResponseUtil.fail(AUTH_INVALID_MOBILE, "手机号格式不正确");
+        }
+        //判断验证码是否正确
+        String cacheCode = CaptchaCodeManager.getCachedCaptcha(mobile);
+        if (cacheCode == null || cacheCode.isEmpty() || !cacheCode.equals(code)) {
+            return ResponseUtil.fail(AUTH_CAPTCHA_UNMATCH, "验证码错误");
+        }
+
+        LitemallUser userParent = userService.queryByInvite(invited);
+        if (Objects.isNull(userParent)){
+            return ResponseUtil.fail(AUTH_INVITED_ERROR, " 邀请码错误");
+        }
+
+        String openId = "";
+        String avatar = "";
+        LitemallUser checkUser = new LitemallUser();
+        // 非空，则是小程序注册
+        // 继续验证openid
+        if (!StringUtils.isEmpty(wxCode)) {
+            try {
+                WxMaJscode2SessionResult result = this.wxService.getUserService().getSessionInfo(wxCode);
+                openId = result.getOpenid();
+            } catch (Exception e) {
+                e.printStackTrace();
+                return ResponseUtil.fail(AUTH_OPENID_UNACCESS, "openid 获取失败");
+            }
+            userList = userService.queryByOpenid(openId);
+            if (userList.size() > 1) {
+                return ResponseUtil.serious();
+            }
+            if (userList.size() == 1) {
+                checkUser = userList.get(0);
+                String checkUsername = checkUser.getUsername();
+                String checkPassword = checkUser.getPassword();
+                avatar = checkUser.getAvatar();
+                if (!checkUsername.equals(openId) || !checkPassword.equals(openId)) {
+                    return ResponseUtil.fail(AUTH_OPENID_BINDED, "openid已绑定账号");
+                }
+            }
+        }
+        //生成邀请码
+        String password = "a123456";
+        String username = "Maitin";
+        if (Objects.nonNull(checkUser)){
+            username = checkUser.getUsername();
+        }
+        String invite = CharUtil.getRandomString(6);
+        LitemallUser user = null;
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+        String encodedPassword = encoder.encode(password);
+        user = userService.queryByOid(openId);
+        user.setUsername(username);
+        user.setPassword(encodedPassword);
+        user.setMobile(mobile);
+        user.setWeixinOpenid(openId);
+        //设置头像，后续可以直接设置对应的微信头像
+        if (org.apache.commons.lang3.StringUtils.isNotBlank(avatar)) {
+            user.setAvatar(avatar);
+        } else {
+            user.setAvatar("https://yanxuan.nosdn.127.net/80841d741d7fa3073e0ae27bf487339f.jpg?imageView&quality=90&thumbnail=64x64");
+        }
+        user.setGender((byte) 0);
+        user.setUserLevel((byte) 0);
+        user.setStatus((byte) 0);
+        user.setInvite(invite);
+        user.setLastLoginTime(LocalDateTime.now());
+        user.setLastLoginIp(IpUtil.getIpAddr(request));
+        userService.updateById(user);
+
+        if (org.apache.commons.lang3.StringUtils.isNotBlank(invited)) {
+            LitemallUser parent = userService.queryByInvite(invited);
+            GameTree parentTree = treeService.queryByPlayerId(parent.getWeixinOpenid());
+            GameTree tree = new GameTree();
+            tree.setTreeId(0);
+            tree.setCreateTime(LocalDateTime.now());
+            tree.setSendAuto("1");
+            tree.setTreeChilds(0);
+            tree.setTreeGrandson(0);
+            tree.setTreeLevel(0);
+            tree.setTreeParentId(parent.getWeixinOpenid());
+            tree.setTreePlayerId(user.getWeixinOpenid());
+            tree.setTreeRelation(parentTree.getTreeRelation() + "/" + invite);
+            treeService.add(tree);
+
+            parentTree.setTreeChilds(parentTree.getTreeChilds() + 1);
+            treeService.updateById(parentTree);
+
+
+            /**
+             *TODO
+             * 保存商会成员时根据成员数量变更商会等级
+             *
+             * 1、首先是上级玩家
+             * 2、然后是上上级玩家至上N级玩家
+             *
+             */
+            GameRuleItem ruleItem = gameRuleService.getRuleItemByFlag(PlAYER_FLAG);
+            List<GameRule> rules = gameRuleService.getRulesByItem(ruleItem.getItemId());
+            Map<Integer, GameTree> parents;
+            //找出所有上级，不包括自己
+
+            parents = treeService.getAllParents(tree);
+
+            for (Map.Entry<Integer, GameTree> entry : parents.entrySet()) {
+                try {
+                    GameTree value = entry.getValue();
+                    //直接下级
+                    int childNum = value.getTreeChilds() == null ? 0 : value.getTreeChilds();
+                    int gNum = value.getTreeGrandson() == null ? 0 : value.getTreeGrandson();
+                    if (tree.getTreeParentId().equalsIgnoreCase(value.getTreePlayerId())) {
+
+                        value.setTreeChilds(childNum + 1);
+                        value.setTreeGrandson(gNum);
+                    } else {
+                        value.setTreeChilds(childNum);
+                        value.setTreeGrandson(gNum + 1);
+                    }
+                    //下级人员总数
+                    int childsSize = value.getTreeChilds() + value.getTreeGrandson();
+
+                    GameTree currentParentTree = treeService.upgradeParent(value, childsSize, rules);
+
+                    int updateById = treeService.updateById(currentParentTree);
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        // 给新用户发送注册优惠券
+        couponAssignService.assignForRegister(user.getId());
+
+        // userInfo
+        UserInfo userInfo = new UserInfo();
+        userInfo.setNickName(username);
+        userInfo.setAvatarUrl(user.getAvatar());
+
+        // token
+        String token = UserTokenManager.generateToken(user.getId());
+
+        Map<Object, Object> result = new HashMap<Object, Object>();
+        result.put("token", token);
+        result.put("userInfo", userInfo);
+        return ResponseUtil.ok(result);
     }
 
     /**
@@ -247,7 +421,7 @@ public class WxAuthController {
         String password = JacksonUtil.parseString(body, "password");
         String mobile = JacksonUtil.parseString(body, "mobile");
         String code = JacksonUtil.parseString(body, "code");
-        String invited = JacksonUtil.parseString(body,"invite");
+        String invited = JacksonUtil.parseString(body, "invite");
         // 如果是小程序注册，则必须非空
         // 其他情况，可以为空
         String wxCode = JacksonUtil.parseString(body, "wxCode");
@@ -275,11 +449,17 @@ public class WxAuthController {
             return ResponseUtil.fail(AUTH_CAPTCHA_UNMATCH, "验证码错误");
         }
 
+        LitemallUser userParent = userService.queryByInvite(invited);
+        if (Objects.isNull(userParent)){
+            return ResponseUtil.fail(AUTH_INVITED_ERROR, " 邀请码错误");
+        }
+
         String openId = "";
         String avatar = "";
+        LitemallUser user = null;
         // 非空，则是小程序注册
         // 继续验证openid
-        if(!StringUtils.isEmpty(wxCode)) {
+        if (!StringUtils.isEmpty(wxCode)) {
             try {
                 WxMaJscode2SessionResult result = this.wxService.getUserService().getSessionInfo(wxCode);
                 openId = result.getOpenid();
@@ -296,401 +476,366 @@ public class WxAuthController {
                 String checkUsername = checkUser.getUsername();
                 String checkPassword = checkUser.getPassword();
                 avatar = checkUser.getAvatar();
-                if (!checkUsername.equals(openId) || !checkPassword.equals(openId)) {
+                if (!checkUsername.equals(checkPassword) && !checkPassword.equals(openId)){
                     return ResponseUtil.fail(AUTH_OPENID_BINDED, "openid已绑定账号");
                 }
+                //更新用户绑定
+                BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+                String encodedPassword = encoder.encode(password);
+                user = checkUser;
+                user.setUsername(username);
+                user.setPassword(encodedPassword);
+                user.setMobile(mobile);
+                //设置头像，后续可以直接设置对应的微信头像
+                if (org.apache.commons.lang3.StringUtils.isNotBlank(avatar)) {
+                    user.setAvatar(avatar);
+                } else {
+                    user.setAvatar("https://yanxuan.nosdn.127.net/80841d741d7fa3073e0ae27bf487339f.jpg?imageView&quality=90&thumbnail=64x64");
+                }
+                user.setLastLoginTime(LocalDateTime.now());
+                user.setLastLoginIp(IpUtil.getIpAddr(request));
+                userService.updateById(user);
+            }else {
+                //增加用户
+                //生成邀请码
+                String invite = CharUtil.getRandomString(6);
+                BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+                String encodedPassword = encoder.encode(password);
+                user = new LitemallUser();
+                user.setUsername(username);
+                user.setPassword(encodedPassword);
+                user.setMobile(mobile);
+                user.setWeixinOpenid(openId);
+                //设置头像，后续可以直接设置对应的微信头像
+                if (org.apache.commons.lang3.StringUtils.isNotBlank(avatar)) {
+                    user.setAvatar(avatar);
+                } else {
+                    user.setAvatar("https://yanxuan.nosdn.127.net/80841d741d7fa3073e0ae27bf487339f.jpg?imageView&quality=90&thumbnail=64x64");
+                }
+                user.setNickname(username);
+                user.setGender((byte) 0);
+                user.setUserLevel((byte) 0);
+                user.setStatus((byte) 0);
+                user.setInvite(invite);
+                user.setLastLoginTime(LocalDateTime.now());
+                user.setLastLoginIp(IpUtil.getIpAddr(request));
+                userService.add(user);
+
+                // 给新用户发送注册优惠券
+                couponAssignService.assignForRegister(user.getId());
             }
-        }
-        //生成邀请码
-        String  invite =  CharUtil.getRandomString(6);
-        LitemallUser user = null;
-        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-        String encodedPassword = encoder.encode(password);
-        user = new LitemallUser();
-        user.setUsername(username);
-        user.setPassword(encodedPassword);
-        user.setMobile(mobile);
-        user.setWeixinOpenid(openId);
-        //设置头像，后续可以直接设置对应的微信头像
-        if (org.apache.commons.lang3.StringUtils.isNotBlank(avatar)){
-            user.setAvatar(avatar);
+            if (org.apache.commons.lang3.StringUtils.isNotBlank(invited)) {
+                LitemallUser parent = userService.queryByInvite(invited);
+                GameTree parentTree = treeService.queryByPlayerId(parent.getWeixinOpenid());
+                GameTree tree = new GameTree();
+                tree.setTreeId(0);
+                tree.setCreateTime(LocalDateTime.now());
+                tree.setSendAuto("1");
+                tree.setTreeChilds(0);
+                tree.setTreeGrandson(0);
+                tree.setTreeLevel(0);
+                tree.setTreeParentId(parent.getWeixinOpenid());
+                tree.setTreePlayerId(user.getWeixinOpenid());
+                tree.setTreeRelation(parentTree.getTreeRelation() + "/" + user.getInvite());
+                treeService.add(tree);
+
+                parentTree.setTreeChilds(parentTree.getTreeChilds() + 1);
+                treeService.updateById(parentTree);
+
+                /**
+                 *TODO
+                 * 保存商会成员时根据成员数量变更商会等级
+                 *
+                 * 1、首先是上级玩家
+                 * 2、然后是上上级玩家至上N级玩家
+                 *
+                 */
+                GameRuleItem ruleItem = gameRuleService.getRuleItemByFlag(PlAYER_FLAG);
+                List<GameRule> rules = gameRuleService.getRulesByItem(ruleItem.getItemId());
+                Map<Integer, GameTree> parents;
+                //找出所有上级，不包括自己
+
+                parents = treeService.getAllParents(tree);
+
+                for (Map.Entry<Integer, GameTree> entry : parents.entrySet()) {
+                    try {
+                        GameTree value = entry.getValue();
+                        //直接下级
+                        int childNum = value.getTreeChilds() == null ? 0 : value.getTreeChilds();
+                        int gNum = value.getTreeGrandson() == null ? 0 : value.getTreeGrandson();
+                        if (tree.getTreeParentId().equalsIgnoreCase(value.getTreePlayerId())) {
+
+                            value.setTreeChilds(childNum + 1);
+                            value.setTreeGrandson(gNum);
+                        } else {
+                            value.setTreeChilds(childNum);
+                            value.setTreeGrandson(gNum + 1);
+                        }
+                        //下级人员总数
+                        int childsSize = value.getTreeChilds() + value.getTreeGrandson();
+
+                        GameTree currentParentTree = treeService.upgradeParent(value, childsSize, rules);
+
+                        int updateById = treeService.updateById(currentParentTree);
+
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+
+
+            // userInfo
+            UserInfo userInfo = new UserInfo();
+            userInfo.setNickName(username);
+            userInfo.setAvatarUrl(user.getAvatar());
+
+            // token
+            String token = UserTokenManager.generateToken(user.getId());
+
+            Map<Object, Object> result = new HashMap<Object, Object>();
+            result.put("token", token);
+            result.put("userInfo", userInfo);
+            return ResponseUtil.ok(result);
         }else {
-            user.setAvatar("https://yanxuan.nosdn.127.net/80841d741d7fa3073e0ae27bf487339f.jpg?imageView&quality=90&thumbnail=64x64");
+            return ResponseUtil.fail(AUTH_WXCODE_EMPTY, "wxCode为空");
         }
-        user.setNickname(username);
-        user.setGender((byte) 0);
-        user.setUserLevel((byte) 0);
-        user.setStatus((byte) 0);
-        user.setInvite(invite);
-        user.setLastLoginTime(LocalDateTime.now());
-        user.setLastLoginIp(IpUtil.getIpAddr(request));
-        userService.add(user);
-
-        if (org.apache.commons.lang3.StringUtils.isNotBlank(invited)){
-            LitemallUser parent = userService.queryByInvite(invited);
-            GameTree parentTree = treeService.queryByPlayerId(parent.getWeixinOpenid());
-            GameTree tree = new GameTree();
-            tree.setTreeId(0);
-            tree.setCreateTime(LocalDateTime.now());
-            tree.setSendAuto("1");
-            tree.setTreeChilds(0);
-            tree.setTreeGrandson(0);
-            tree.setTreeLevel(0);
-            tree.setTreeParentId(parent.getWeixinOpenid());
-            tree.setTreePlayerId(user.getWeixinOpenid());
-            tree.setTreeRelation(parentTree.getTreeRelation()+"/"+invite);
-            treeService.add(tree);
-
-            parentTree.setTreeChilds(parentTree.getTreeChilds()+1);
-            treeService.updateById(parentTree);
+    }
 
 
-            /**
-             *TODO
-             * 保存商会成员时根据成员数量变更商会等级
-             *
-             * 1、首先是上级玩家
-             * 2、然后是上上级玩家至上N级玩家
-             *
-             */
-            RuleItem ruleItem = investRuleService.getRuleItemByFlag(PlAYER_FLAG);
-            List<InvestRule> rules = investRuleService.getRulesByItem(ruleItem.getItemId());
-            Map<Integer, RelationTree> parents;
-            //找出所有上级，不包括自己
-            if(playerTree==null){
-                playerTree = tree;
-                parents = getAllParents(playerTree);
-
-            }else{
-                parents = getAllParents(playerTree);
+        /**
+         * 请求验证码
+         *
+         * TODO
+         * 这里需要一定机制防止短信验证码被滥用
+         *
+         * @param body 手机号码 { mobile: xxx, type: xxx }
+         * @return
+         */
+        @PostMapping("captcha")
+        public Object captcha (@LoginUser Integer userId, @RequestBody String body){
+            if (userId == null) {
+                return ResponseUtil.unlogin();
+            }
+            String phoneNumber = JacksonUtil.parseString(body, "mobile");
+            String captchaType = JacksonUtil.parseString(body, "type");
+            if (StringUtils.isEmpty(phoneNumber)) {
+                return ResponseUtil.badArgument();
+            }
+            if (!RegexUtil.isMobileExact(phoneNumber)) {
+                return ResponseUtil.badArgumentValue();
+            }
+            if (StringUtils.isEmpty(captchaType)) {
+                return ResponseUtil.badArgument();
             }
 
-            for(Map.Entry<Integer,RelationTree> entry : parents.entrySet()){
-                try {
-                    RelationTree value = entry.getValue();
-                    //直接下级
-                    int childNum = value.getTreeChilds()==null?0:value.getTreeChilds();
-                    int gNum =  value.getTreeGrandson()==null?0:value.getTreeGrandson();
-                    if (playerTree.getTreeParentId().equalsIgnoreCase(value.getTreePlayerId())) {
+            if (!notifyService.isSmsEnable()) {
+                return ResponseUtil.fail(AUTH_CAPTCHA_UNSUPPORT, "小程序后台验证码服务不支持");
+            }
+            String code = CharUtil.getRandomNum(6);
+            // TODO
+            // 根据type发送不同的验证码
+            notifyService.notifySmsTemplate(phoneNumber, NotifyType.CAPTCHA, new String[]{code});
 
-                        value.setTreeChilds( childNum + 1);
-                        value.setTreeGrandson( gNum);
-                    } else {
-                        value.setTreeChilds( childNum);
-                        value.setTreeGrandson( gNum+ 1);
-                    }
-                    //下级人员总数
-                    int childsSize = value.getTreeChilds() + value.getTreeGrandson();
-
-                    RelationTree currentParentTree = upgradeParent(value, childsSize,rules);
-
-                    Result result = updateTree(currentParentTree);
-                    if (!result.getSuccess()){
-                        throw new BusinessException("升级玩家["+value.getTreePlayerId()+"]出错");
-                    }
-                } catch (Exception e) {
-                    throw new BusinessException("升级出错");
-                }
-            }/**
-             *TODO
-             * 保存商会成员时根据成员数量变更商会等级
-             *
-             * 1、首先是上级玩家
-             * 2、然后是上上级玩家至上N级玩家
-             *
-             */
-            RuleItem ruleItem = investRuleService.getRuleItemByFlag(PlAYER_FLAG);
-            List<InvestRule> rules = investRuleService.getRulesByItem(ruleItem.getItemId());
-            Map<Integer, RelationTree> parents;
-            //找出所有上级，不包括自己
-            if(playerTree==null){
-                playerTree = tree;
-                parents = getAllParents(playerTree);
-
-            }else{
-                parents = getAllParents(playerTree);
+            boolean successful = CaptchaCodeManager.addToCache(phoneNumber, code);
+            if (!successful) {
+                return ResponseUtil.fail(AUTH_CAPTCHA_FREQUENCY, "验证码未超时1分钟，不能发送");
             }
 
-            for(Map.Entry<Integer,RelationTree> entry : parents.entrySet()){
-                try {
-                    RelationTree value = entry.getValue();
-                    //直接下级
-                    int childNum = value.getTreeChilds()==null?0:value.getTreeChilds();
-                    int gNum =  value.getTreeGrandson()==null?0:value.getTreeGrandson();
-                    if (playerTree.getTreeParentId().equalsIgnoreCase(value.getTreePlayerId())) {
+            return ResponseUtil.ok();
+        }
 
-                        value.setTreeChilds( childNum + 1);
-                        value.setTreeGrandson( gNum);
-                    } else {
-                        value.setTreeChilds( childNum);
-                        value.setTreeGrandson( gNum+ 1);
-                    }
-                    //下级人员总数
-                    int childsSize = value.getTreeChilds() + value.getTreeGrandson();
+        /**
+         * 账号密码重置
+         *
+         * @param body    请求内容
+         *                {
+         *                password: xxx,
+         *                mobile: xxx
+         *                code: xxx
+         *                }
+         *                其中code是手机验证码，目前还不支持手机短信验证码
+         * @param request 请求对象
+         * @return 登录结果
+         * 成功则 { errno: 0, errmsg: '成功' }
+         * 失败则 { errno: XXX, errmsg: XXX }
+         */
+        @PostMapping("reset")
+        public Object reset (@RequestBody String body, HttpServletRequest request){
+            String password = JacksonUtil.parseString(body, "password");
+            String mobile = JacksonUtil.parseString(body, "mobile");
+            String code = JacksonUtil.parseString(body, "code");
 
-                    RelationTree currentParentTree = upgradeParent(value, childsSize,rules);
-
-                    Result result = updateTree(currentParentTree);
-                    if (!result.getSuccess()){
-                        throw new BusinessException("升级玩家["+value.getTreePlayerId()+"]出错");
-                    }
-                } catch (Exception e) {
-                    throw new BusinessException("升级出错");
-                }
+            if (mobile == null || code == null || password == null) {
+                return ResponseUtil.badArgument();
             }
+
+            //判断验证码是否正确
+            String cacheCode = CaptchaCodeManager.getCachedCaptcha(mobile);
+            if (cacheCode == null || cacheCode.isEmpty() || !cacheCode.equals(code))
+                return ResponseUtil.fail(AUTH_CAPTCHA_UNMATCH, "验证码错误");
+
+            List<LitemallUser> userList = userService.queryByMobile(mobile);
+            LitemallUser user = null;
+            if (userList.size() > 1) {
+                return ResponseUtil.serious();
+            } else if (userList.size() == 0) {
+                return ResponseUtil.fail(AUTH_MOBILE_UNREGISTERED, "手机号未注册");
+            } else {
+                user = userList.get(0);
+            }
+
+            BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+            String encodedPassword = encoder.encode(password);
+            user.setPassword(encodedPassword);
+
+            if (userService.updateById(user) == 0) {
+                return ResponseUtil.updatedDataFailed();
+            }
+
+            return ResponseUtil.ok();
         }
 
-        // 给新用户发送注册优惠券
-        couponAssignService.assignForRegister(user.getId());
+        /**
+         * 账号手机号码重置
+         *
+         * @param body    请求内容
+         *                {
+         *                password: xxx,
+         *                mobile: xxx
+         *                code: xxx
+         *                }
+         *                其中code是手机验证码，目前还不支持手机短信验证码
+         * @param request 请求对象
+         * @return 登录结果
+         * 成功则 { errno: 0, errmsg: '成功' }
+         * 失败则 { errno: XXX, errmsg: XXX }
+         */
+        @PostMapping("resetPhone")
+        public Object resetPhone (@LoginUser Integer userId, @RequestBody String body, HttpServletRequest request){
+            if (userId == null) {
+                return ResponseUtil.unlogin();
+            }
+            String password = JacksonUtil.parseString(body, "password");
+            String mobile = JacksonUtil.parseString(body, "mobile");
+            String code = JacksonUtil.parseString(body, "code");
 
-        // userInfo
-        UserInfo userInfo = new UserInfo();
-        userInfo.setNickName(username);
-        userInfo.setAvatarUrl(user.getAvatar());
+            if (mobile == null || code == null || password == null) {
+                return ResponseUtil.badArgument();
+            }
 
-        // token
-        String token = UserTokenManager.generateToken(user.getId());
-        
-        Map<Object, Object> result = new HashMap<Object, Object>();
-        result.put("token", token);
-        result.put("userInfo", userInfo);
-        return ResponseUtil.ok(result);
+            //判断验证码是否正确
+            String cacheCode = CaptchaCodeManager.getCachedCaptcha(mobile);
+            if (cacheCode == null || cacheCode.isEmpty() || !cacheCode.equals(code))
+                return ResponseUtil.fail(AUTH_CAPTCHA_UNMATCH, "验证码错误");
+
+            List<LitemallUser> userList = userService.queryByMobile(mobile);
+            LitemallUser user = null;
+            if (userList.size() > 1) {
+                return ResponseUtil.fail(AUTH_MOBILE_REGISTERED, "手机号已注册");
+            }
+            user = userService.findById(userId);
+
+            BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+            if (!encoder.matches(password, user.getPassword())) {
+                return ResponseUtil.fail(AUTH_INVALID_ACCOUNT, "账号密码不对");
+            }
+
+            user.setMobile(mobile);
+            if (userService.updateById(user) == 0) {
+                return ResponseUtil.updatedDataFailed();
+            }
+
+            return ResponseUtil.ok();
+        }
+
+        /**
+         * 账号信息更新
+         *
+         * @param body    请求内容
+         *                {
+         *                password: xxx,
+         *                mobile: xxx
+         *                code: xxx
+         *                }
+         *                其中code是手机验证码，目前还不支持手机短信验证码
+         * @param request 请求对象
+         * @return 登录结果
+         * 成功则 { errno: 0, errmsg: '成功' }
+         * 失败则 { errno: XXX, errmsg: XXX }
+         */
+        @PostMapping("profile")
+        public Object profile (@LoginUser Integer userId, @RequestBody String body, HttpServletRequest request){
+            if (userId == null) {
+                return ResponseUtil.unlogin();
+            }
+            String avatar = JacksonUtil.parseString(body, "avatar");
+            Byte gender = JacksonUtil.parseByte(body, "gender");
+            String nickname = JacksonUtil.parseString(body, "nickname");
+
+            LitemallUser user = userService.findById(userId);
+            if (!StringUtils.isEmpty(avatar)) {
+                user.setAvatar(avatar);
+            }
+            if (gender != null) {
+                user.setGender(gender);
+            }
+            if (!StringUtils.isEmpty(nickname)) {
+                user.setNickname(nickname);
+            }
+
+            if (userService.updateById(user) == 0) {
+                return ResponseUtil.updatedDataFailed();
+            }
+
+            return ResponseUtil.ok();
+        }
+
+        /**
+         * 微信手机号码绑定
+         *
+         * @param userId
+         * @param body
+         * @return
+         */
+        @PostMapping("bindPhone")
+        public Object bindPhone (@LoginUser Integer userId, @RequestBody String body){
+            if (userId == null) {
+                return ResponseUtil.unlogin();
+            }
+            LitemallUser user = userService.findById(userId);
+            String encryptedData = JacksonUtil.parseString(body, "encryptedData");
+            String iv = JacksonUtil.parseString(body, "iv");
+            WxMaPhoneNumberInfo phoneNumberInfo = this.wxService.getUserService().getPhoneNoInfo(user.getSessionKey(), encryptedData, iv);
+            String phone = phoneNumberInfo.getPhoneNumber();
+            user.setMobile(phone);
+            if (userService.updateById(user) == 0) {
+                return ResponseUtil.updatedDataFailed();
+            }
+            return ResponseUtil.ok();
+        }
+
+        @PostMapping("logout")
+        public Object logout (@LoginUser Integer userId){
+            if (userId == null) {
+                return ResponseUtil.unlogin();
+            }
+            return ResponseUtil.ok();
+        }
+
+        @GetMapping("info")
+        public Object info (@LoginUser Integer userId){
+            if (userId == null) {
+                return ResponseUtil.unlogin();
+            }
+
+            LitemallUser user = userService.findById(userId);
+            Map<Object, Object> data = new HashMap<Object, Object>();
+            data.put("nickName", user.getNickname());
+            data.put("avatar", user.getAvatar());
+            data.put("gender", user.getGender());
+            data.put("mobile", user.getMobile());
+
+            return ResponseUtil.ok(data);
+        }
     }
-
-
-    /**
-     * 请求验证码
-     *
-     * TODO
-     * 这里需要一定机制防止短信验证码被滥用
-     *
-     * @param body 手机号码 { mobile: xxx, type: xxx }
-     * @return
-     */
-    @PostMapping("captcha")
-    public Object captcha(@LoginUser Integer userId, @RequestBody String body) {
-        if(userId == null){
-            return ResponseUtil.unlogin();
-        }
-        String phoneNumber = JacksonUtil.parseString(body, "mobile");
-        String captchaType = JacksonUtil.parseString(body, "type");
-        if (StringUtils.isEmpty(phoneNumber)) {
-            return ResponseUtil.badArgument();
-        }
-        if (!RegexUtil.isMobileExact(phoneNumber)) {
-            return ResponseUtil.badArgumentValue();
-        }
-        if (StringUtils.isEmpty(captchaType)) {
-            return ResponseUtil.badArgument();
-        }
-
-        if (!notifyService.isSmsEnable()) {
-            return ResponseUtil.fail(AUTH_CAPTCHA_UNSUPPORT, "小程序后台验证码服务不支持");
-        }
-        String code = CharUtil.getRandomNum(6);
-        // TODO
-        // 根据type发送不同的验证码
-        notifyService.notifySmsTemplate(phoneNumber, NotifyType.CAPTCHA, new String[]{code});
-
-        boolean successful = CaptchaCodeManager.addToCache(phoneNumber, code);
-        if (!successful) {
-            return ResponseUtil.fail(AUTH_CAPTCHA_FREQUENCY, "验证码未超时1分钟，不能发送");
-        }
-
-        return ResponseUtil.ok();
-    }
-
-    /**
-     * 账号密码重置
-     *
-     * @param body    请求内容
-     *                {
-     *                password: xxx,
-     *                mobile: xxx
-     *                code: xxx
-     *                }
-     *                其中code是手机验证码，目前还不支持手机短信验证码
-     * @param request 请求对象
-     * @return 登录结果
-     * 成功则 { errno: 0, errmsg: '成功' }
-     * 失败则 { errno: XXX, errmsg: XXX }
-     */
-    @PostMapping("reset")
-    public Object reset(@RequestBody String body, HttpServletRequest request) {
-        String password = JacksonUtil.parseString(body, "password");
-        String mobile = JacksonUtil.parseString(body, "mobile");
-        String code = JacksonUtil.parseString(body, "code");
-
-        if (mobile == null || code == null || password == null) {
-            return ResponseUtil.badArgument();
-        }
-
-        //判断验证码是否正确
-        String cacheCode = CaptchaCodeManager.getCachedCaptcha(mobile);
-        if (cacheCode == null || cacheCode.isEmpty() || !cacheCode.equals(code))
-            return ResponseUtil.fail(AUTH_CAPTCHA_UNMATCH, "验证码错误");
-
-        List<LitemallUser> userList = userService.queryByMobile(mobile);
-        LitemallUser user = null;
-        if (userList.size() > 1) {
-            return ResponseUtil.serious();
-        } else if (userList.size() == 0) {
-            return ResponseUtil.fail(AUTH_MOBILE_UNREGISTERED, "手机号未注册");
-        } else {
-            user = userList.get(0);
-        }
-
-        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-        String encodedPassword = encoder.encode(password);
-        user.setPassword(encodedPassword);
-
-        if (userService.updateById(user) == 0) {
-            return ResponseUtil.updatedDataFailed();
-        }
-
-        return ResponseUtil.ok();
-    }
-
-    /**
-     * 账号手机号码重置
-     *
-     * @param body    请求内容
-     *                {
-     *                password: xxx,
-     *                mobile: xxx
-     *                code: xxx
-     *                }
-     *                其中code是手机验证码，目前还不支持手机短信验证码
-     * @param request 请求对象
-     * @return 登录结果
-     * 成功则 { errno: 0, errmsg: '成功' }
-     * 失败则 { errno: XXX, errmsg: XXX }
-     */
-    @PostMapping("resetPhone")
-    public Object resetPhone(@LoginUser Integer userId, @RequestBody String body, HttpServletRequest request) {
-        if(userId == null){
-            return ResponseUtil.unlogin();
-        }
-        String password = JacksonUtil.parseString(body, "password");
-        String mobile = JacksonUtil.parseString(body, "mobile");
-        String code = JacksonUtil.parseString(body, "code");
-
-        if (mobile == null || code == null || password == null) {
-            return ResponseUtil.badArgument();
-        }
-
-        //判断验证码是否正确
-        String cacheCode = CaptchaCodeManager.getCachedCaptcha(mobile);
-        if (cacheCode == null || cacheCode.isEmpty() || !cacheCode.equals(code))
-            return ResponseUtil.fail(AUTH_CAPTCHA_UNMATCH, "验证码错误");
-
-        List<LitemallUser> userList = userService.queryByMobile(mobile);
-        LitemallUser user = null;
-        if (userList.size() > 1) {
-            return ResponseUtil.fail(AUTH_MOBILE_REGISTERED, "手机号已注册");
-        }
-        user = userService.findById(userId);
-
-        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-        if (!encoder.matches(password, user.getPassword())) {
-            return ResponseUtil.fail(AUTH_INVALID_ACCOUNT, "账号密码不对");
-        }
-
-        user.setMobile(mobile);
-        if (userService.updateById(user) == 0) {
-            return ResponseUtil.updatedDataFailed();
-        }
-
-        return ResponseUtil.ok();
-    }
-
-    /**
-     * 账号信息更新
-     *
-     * @param body    请求内容
-     *                {
-     *                password: xxx,
-     *                mobile: xxx
-     *                code: xxx
-     *                }
-     *                其中code是手机验证码，目前还不支持手机短信验证码
-     * @param request 请求对象
-     * @return 登录结果
-     * 成功则 { errno: 0, errmsg: '成功' }
-     * 失败则 { errno: XXX, errmsg: XXX }
-     */
-    @PostMapping("profile")
-    public Object profile(@LoginUser Integer userId, @RequestBody String body, HttpServletRequest request) {
-        if(userId == null){
-            return ResponseUtil.unlogin();
-        }
-        String avatar = JacksonUtil.parseString(body, "avatar");
-        Byte gender = JacksonUtil.parseByte(body, "gender");
-        String nickname = JacksonUtil.parseString(body, "nickname");
-
-        LitemallUser user = userService.findById(userId);
-        if(!StringUtils.isEmpty(avatar)){
-            user.setAvatar(avatar);
-        }
-        if(gender != null){
-            user.setGender(gender);
-        }
-        if(!StringUtils.isEmpty(nickname)){
-            user.setNickname(nickname);
-        }
-
-        if (userService.updateById(user) == 0) {
-            return ResponseUtil.updatedDataFailed();
-        }
-
-        return ResponseUtil.ok();
-    }
-
-    /**
-     * 微信手机号码绑定
-     *
-     * @param userId
-     * @param body
-     * @return
-     */
-    @PostMapping("bindPhone")
-    public Object bindPhone(@LoginUser Integer userId, @RequestBody String body) {
-    	if (userId == null) {
-            return ResponseUtil.unlogin();
-        }
-    	LitemallUser user = userService.findById(userId);
-        String encryptedData = JacksonUtil.parseString(body, "encryptedData");
-        String iv = JacksonUtil.parseString(body, "iv");
-        WxMaPhoneNumberInfo phoneNumberInfo = this.wxService.getUserService().getPhoneNoInfo(user.getSessionKey(), encryptedData, iv);
-        String phone = phoneNumberInfo.getPhoneNumber();
-        user.setMobile(phone);
-        if (userService.updateById(user) == 0) {
-            return ResponseUtil.updatedDataFailed();
-        }
-        return ResponseUtil.ok();
-    }
-
-    @PostMapping("logout")
-    public Object logout(@LoginUser Integer userId) {
-        if (userId == null) {
-            return ResponseUtil.unlogin();
-        }
-        return ResponseUtil.ok();
-    }
-
-    @GetMapping("info")
-    public Object info(@LoginUser Integer userId) {
-        if (userId == null) {
-            return ResponseUtil.unlogin();
-        }
-
-        LitemallUser user = userService.findById(userId);
-        Map<Object, Object> data = new HashMap<Object, Object>();
-        data.put("nickName", user.getNickname());
-        data.put("avatar", user.getAvatar());
-        data.put("gender", user.getGender());
-        data.put("mobile", user.getMobile());
-
-        return ResponseUtil.ok(data);
-    }
-}

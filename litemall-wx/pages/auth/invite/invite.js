@@ -10,30 +10,43 @@ Page({
     confirmPassword: '',
     mobile: '',
     invite: '',
-    code: ''
+    code: '',
+    isLogined: false
+
   },
-  onLoad: function (options) {
+  onLoad: function(options) {
     // 页面初始化 options为页面跳转所带来的参数
     // 页面渲染完成
-    this.setData({ invite: options.invite});
+    //判断参数中存在邀请码属性
+    if (options.hasOwnProperty('invite')) {
+      this.setData({
+        invite: options.invite
+      });
+    }
+    console.log(app.globalData);
+    if (app.globalData.hasLogin) {
+      this.setData({
+        isLogined: true
+      });
+    }
 
   },
-  onReady: function () {
+  onReady: function() {
 
   },
-  onShow: function () {
+  onShow: function() {
     // 页面显示
 
   },
-  onHide: function () {
+  onHide: function() {
     // 页面隐藏
 
   },
-  onUnload: function () {
+  onUnload: function() {
     // 页面关闭
 
   },
-  sendCode: function () {
+  sendCode: function() {
     let that = this;
 
     if (this.data.mobile.length == 0) {
@@ -63,7 +76,7 @@ Page({
       header: {
         'content-type': 'application/json'
       },
-      success: function (res) {
+      success: function(res) {
         if (res.data.errno == 0) {
           wx.showModal({
             title: '发送成功',
@@ -80,64 +93,107 @@ Page({
       }
     });
   },
-  requestRegister: function (wxCode) {
+  requestRegister: function(wxCode, isLogined) {
     let that = this;
-    wx.request({
-      url: api.AuthRegister,
-      data: {
-        username: that.data.username,
-        password: that.data.password,
-        mobile: that.data.mobile,
-        code: that.data.code,
-        invite:that.data.invite,
-        wxCode: wxCode
-      },
-      method: 'POST',
-      header: {
-        'content-type': 'application/json'
-      },
-      success: function (res) {
-        if (res.data.errno == 0) {
-          app.globalData.hasLogin = true;
-          wx.setStorageSync('userInfo', res.data.data.userInfo);
-          wx.setStorage({
-            key: "token",
-            data: res.data.data.token,
-            success: function () {
-              wx.switchTab({
-                url: '/pages/ucenter/index/index'
-              });
-            }
-          });
-        } else {
-          wx.showModal({
-            title: '错误信息',
-            content: res.data.errmsg,
-            showCancel: false
-          });
+    if (isLogined) {
+      wx.request({
+        url: api.AuthRegisterInvite,
+        data: {
+          mobile: that.data.mobile,
+          code: that.data.code,
+          invite: that.data.invite,
+          wxCode: wxCode
+        },
+        method: 'POST',
+        header: {
+          'content-type': 'application/json'
+        },
+        success: function (res) {
+          if (res.data.errno == 0) {
+            app.globalData.hasLogin = true;
+            wx.setStorageSync('userInfo', res.data.data.userInfo);
+            wx.setStorage({
+              key: "token",
+              data: res.data.data.token,
+              success: function () {
+                wx.switchTab({
+                  url: '/pages/ucenter/index/index'
+                });
+              }
+            });
+          } else {
+            wx.showModal({
+              title: '错误信息',
+              content: res.data.errmsg,
+              showCancel: false
+            });
+          }
         }
-      }
-    });
-  },
-  startRegister: function () {
-    var that = this;
-
-    if (this.data.password.length < 6 || this.data.username.length < 6) {
-      wx.showModal({
-        title: '错误信息',
-        content: '用户名和密码不得少于6位',
-        showCancel: false
       });
-      return false;
+    } else {
+      wx.request({
+        url: api.AuthRegister,
+        data: {
+          username: that.data.username,
+          password: that.data.password,
+          mobile: that.data.mobile,
+          code: that.data.code,
+          invite: that.data.invite,
+          wxCode: wxCode
+        },
+        method: 'POST',
+        header: {
+          'content-type': 'application/json'
+        },
+        success: function(res) {
+          if (res.data.errno == 0) {
+            app.globalData.hasLogin = true;
+            wx.setStorageSync('userInfo', res.data.data.userInfo);
+            wx.setStorage({
+              key: "token",
+              data: res.data.data.token,
+              success: function() {
+                wx.switchTab({
+                  url: '/pages/ucenter/index/index'
+                });
+              }
+            });
+          } else {
+            wx.showModal({
+              title: '错误信息',
+              content: res.data.errmsg,
+              showCancel: false
+            });
+          }
+        }
+      });
     }
+  },
+  startRegister: function() {
+    var that = this;
+    var isLogined = that.data.isLogined;
+    if (!isLogined) {
 
-    if (this.data.password != this.data.confirmPassword) {
-      wx.showModal({
-        title: '错误信息',
-        content: '确认密码不一致',
-        showCancel: false
-      });
-      return false;
+
+
+      if (this.data.password.length < 6 || this.data.username.length < 6) {
+        wx.showModal({
+          title: '错误信息',
+          content: '用户名和密码不得少于6位',
+          showCancel: false
+        });
+        return false;
+      }
+
+      if (this.data.password != this.data.confirmPassword) {
+        wx.showModal({
+          title: '错误信息',
+          content: '确认密码不一致',
+          showCancel: false
+        });
+        return false;
+      }
+
     }
 
     if (this.data.mobile.length == 0 || this.data.code.length == 0) {
@@ -159,7 +215,7 @@ Page({
     }
 
     wx.login({
-      success: function (res) {
+      success: function(res) {
         if (!res.code) {
           wx.showModal({
             title: '错误信息',
@@ -172,32 +228,32 @@ Page({
       }
     });
   },
-  bindUsernameInput: function (e) {
+  bindUsernameInput: function(e) {
 
     this.setData({
       username: e.detail.value
     });
   },
-  bindPasswordInput: function (e) {
+  bindPasswordInput: function(e) {
 
     this.setData({
       password: e.detail.value
     });
   },
-  bindConfirmPasswordInput: function (e) {
+  bindConfirmPasswordInput: function(e) {
 
     this.setData({
       confirmPassword: e.detail.value
     });
   },
-  bindMobileInput: function (e) {
+  bindMobileInput: function(e) {
 
     this.setData({
       mobile: e.detail.value
     });
   },
-  bindInviteInput: function (e) {
-    if (e.detail.value.length>6){
+  bindInviteInput: function(e) {
+    if (e.detail.value.length > 6) {
       wx.showModal({
         title: '邀请码错误',
         content: '请更正',
@@ -208,13 +264,13 @@ Page({
       invite: e.detail.value
     });
   },
-  bindCodeInput: function (e) {
+  bindCodeInput: function(e) {
 
     this.setData({
       code: e.detail.value
     });
   },
-  clearInput: function (e) {
+  clearInput: function(e) {
     switch (e.currentTarget.id) {
       case 'clear-username':
         this.setData({
@@ -240,7 +296,7 @@ Page({
         this.setData({
           invite: ''
         });
-        break;  
+        break;
       case 'clear-code':
         this.setData({
           code: ''
