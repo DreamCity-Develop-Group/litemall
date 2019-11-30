@@ -100,6 +100,16 @@ export const asyncRouterMap = [
         }
       },
       {
+        path: 'level',
+        component: () => import('@/views/user/level'),
+        name: 'level',
+        meta: {
+          perms: ['GET /admin/level/list'],
+          title: '等级管理',
+          noCache: true
+        }
+      },
+      {
         path: 'address',
         component: () => import('@/views/user/address'),
         name: 'address',

@@ -12,8 +12,10 @@ import org.linlinjava.litemall.core.util.JacksonUtil;
 import org.linlinjava.litemall.core.util.RegexUtil;
 import org.linlinjava.litemall.core.util.ResponseUtil;
 import org.linlinjava.litemall.core.util.bcrypt.BCryptPasswordEncoder;
+import org.linlinjava.litemall.db.domain.GameTree;
 import org.linlinjava.litemall.db.domain.LitemallUser;
 import org.linlinjava.litemall.db.service.CouponAssignService;
+import org.linlinjava.litemall.db.service.GameTreeService;
 import org.linlinjava.litemall.db.service.LitemallUserService;
 import org.linlinjava.litemall.wx.annotation.LoginUser;
 import org.linlinjava.litemall.wx.dto.UserInfo;
@@ -55,6 +57,9 @@ public class WxAuthController {
 
     @Autowired
     private CouponAssignService couponAssignService;
+
+    @Autowired
+    private GameTreeService treeService;
 
     /**
      * 账号登录
@@ -197,6 +202,9 @@ public class WxAuthController {
             return ResponseUtil.fail(AUTH_CAPTCHA_UNSUPPORT, "小程序后台验证码服务不支持");
         }
         String code = CharUtil.getRandomNum(6);
+        logger.info("regCaptcha Code is{"+code+"}");
+
+
         notifyService.notifySmsTemplate(phoneNumber, NotifyType.CAPTCHA, new String[]{code});
 
         boolean successful = CaptchaCodeManager.addToCache(phoneNumber, code);
@@ -239,6 +247,7 @@ public class WxAuthController {
         String password = JacksonUtil.parseString(body, "password");
         String mobile = JacksonUtil.parseString(body, "mobile");
         String code = JacksonUtil.parseString(body, "code");
+        String invited = JacksonUtil.parseString(body,"invite");
         // 如果是小程序注册，则必须非空
         // 其他情况，可以为空
         String wxCode = JacksonUtil.parseString(body, "wxCode");
@@ -267,6 +276,7 @@ public class WxAuthController {
         }
 
         String openId = "";
+        String avatar = "";
         // 非空，则是小程序注册
         // 继续验证openid
         if(!StringUtils.isEmpty(wxCode)) {
@@ -285,12 +295,14 @@ public class WxAuthController {
                 LitemallUser checkUser = userList.get(0);
                 String checkUsername = checkUser.getUsername();
                 String checkPassword = checkUser.getPassword();
+                avatar = checkUser.getAvatar();
                 if (!checkUsername.equals(openId) || !checkPassword.equals(openId)) {
                     return ResponseUtil.fail(AUTH_OPENID_BINDED, "openid已绑定账号");
                 }
             }
         }
-
+        //生成邀请码
+        String  invite =  CharUtil.getRandomString(6);
         LitemallUser user = null;
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
         String encodedPassword = encoder.encode(password);
@@ -299,14 +311,134 @@ public class WxAuthController {
         user.setPassword(encodedPassword);
         user.setMobile(mobile);
         user.setWeixinOpenid(openId);
-        user.setAvatar("https://yanxuan.nosdn.127.net/80841d741d7fa3073e0ae27bf487339f.jpg?imageView&quality=90&thumbnail=64x64");
+        //设置头像，后续可以直接设置对应的微信头像
+        if (org.apache.commons.lang3.StringUtils.isNotBlank(avatar)){
+            user.setAvatar(avatar);
+        }else {
+            user.setAvatar("https://yanxuan.nosdn.127.net/80841d741d7fa3073e0ae27bf487339f.jpg?imageView&quality=90&thumbnail=64x64");
+        }
         user.setNickname(username);
         user.setGender((byte) 0);
         user.setUserLevel((byte) 0);
         user.setStatus((byte) 0);
+        user.setInvite(invite);
         user.setLastLoginTime(LocalDateTime.now());
         user.setLastLoginIp(IpUtil.getIpAddr(request));
         userService.add(user);
+
+        if (org.apache.commons.lang3.StringUtils.isNotBlank(invited)){
+            LitemallUser parent = userService.queryByInvite(invited);
+            GameTree parentTree = treeService.queryByPlayerId(parent.getWeixinOpenid());
+            GameTree tree = new GameTree();
+            tree.setTreeId(0);
+            tree.setCreateTime(LocalDateTime.now());
+            tree.setSendAuto("1");
+            tree.setTreeChilds(0);
+            tree.setTreeGrandson(0);
+            tree.setTreeLevel(0);
+            tree.setTreeParentId(parent.getWeixinOpenid());
+            tree.setTreePlayerId(user.getWeixinOpenid());
+            tree.setTreeRelation(parentTree.getTreeRelation()+"/"+invite);
+            treeService.add(tree);
+
+            parentTree.setTreeChilds(parentTree.getTreeChilds()+1);
+            treeService.updateById(parentTree);
+
+
+            /**
+             *TODO
+             * 保存商会成员时根据成员数量变更商会等级
+             *
+             * 1、首先是上级玩家
+             * 2、然后是上上级玩家至上N级玩家
+             *
+             */
+            RuleItem ruleItem = investRuleService.getRuleItemByFlag(PlAYER_FLAG);
+            List<InvestRule> rules = investRuleService.getRulesByItem(ruleItem.getItemId());
+            Map<Integer, RelationTree> parents;
+            //找出所有上级，不包括自己
+            if(playerTree==null){
+                playerTree = tree;
+                parents = getAllParents(playerTree);
+
+            }else{
+                parents = getAllParents(playerTree);
+            }
+
+            for(Map.Entry<Integer,RelationTree> entry : parents.entrySet()){
+                try {
+                    RelationTree value = entry.getValue();
+                    //直接下级
+                    int childNum = value.getTreeChilds()==null?0:value.getTreeChilds();
+                    int gNum =  value.getTreeGrandson()==null?0:value.getTreeGrandson();
+                    if (playerTree.getTreeParentId().equalsIgnoreCase(value.getTreePlayerId())) {
+
+                        value.setTreeChilds( childNum + 1);
+                        value.setTreeGrandson( gNum);
+                    } else {
+                        value.setTreeChilds( childNum);
+                        value.setTreeGrandson( gNum+ 1);
+                    }
+                    //下级人员总数
+                    int childsSize = value.getTreeChilds() + value.getTreeGrandson();
+
+                    RelationTree currentParentTree = upgradeParent(value, childsSize,rules);
+
+                    Result result = updateTree(currentParentTree);
+                    if (!result.getSuccess()){
+                        throw new BusinessException("升级玩家["+value.getTreePlayerId()+"]出错");
+                    }
+                } catch (Exception e) {
+                    throw new BusinessException("升级出错");
+                }
+            }/**
+             *TODO
+             * 保存商会成员时根据成员数量变更商会等级
+             *
+             * 1、首先是上级玩家
+             * 2、然后是上上级玩家至上N级玩家
+             *
+             */
+            RuleItem ruleItem = investRuleService.getRuleItemByFlag(PlAYER_FLAG);
+            List<InvestRule> rules = investRuleService.getRulesByItem(ruleItem.getItemId());
+            Map<Integer, RelationTree> parents;
+            //找出所有上级，不包括自己
+            if(playerTree==null){
+                playerTree = tree;
+                parents = getAllParents(playerTree);
+
+            }else{
+                parents = getAllParents(playerTree);
+            }
+
+            for(Map.Entry<Integer,RelationTree> entry : parents.entrySet()){
+                try {
+                    RelationTree value = entry.getValue();
+                    //直接下级
+                    int childNum = value.getTreeChilds()==null?0:value.getTreeChilds();
+                    int gNum =  value.getTreeGrandson()==null?0:value.getTreeGrandson();
+                    if (playerTree.getTreeParentId().equalsIgnoreCase(value.getTreePlayerId())) {
+
+                        value.setTreeChilds( childNum + 1);
+                        value.setTreeGrandson( gNum);
+                    } else {
+                        value.setTreeChilds( childNum);
+                        value.setTreeGrandson( gNum+ 1);
+                    }
+                    //下级人员总数
+                    int childsSize = value.getTreeChilds() + value.getTreeGrandson();
+
+                    RelationTree currentParentTree = upgradeParent(value, childsSize,rules);
+
+                    Result result = updateTree(currentParentTree);
+                    if (!result.getSuccess()){
+                        throw new BusinessException("升级玩家["+value.getTreePlayerId()+"]出错");
+                    }
+                } catch (Exception e) {
+                    throw new BusinessException("升级出错");
+                }
+            }
+        }
 
         // 给新用户发送注册优惠券
         couponAssignService.assignForRegister(user.getId());

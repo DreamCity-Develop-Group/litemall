@@ -13,7 +13,7 @@ import org.springframework.test.context.web.WebAppConfiguration;
 
 @WebAppConfiguration
 @RunWith(SpringJUnit4ClassRunner.class)
-@SpringBootTest(classes = Application.class)
+@SpringBootTest(classes = CoreApplication.class)
 public class ExpressTest {
 
     private final Log logger = LogFactory.getLog(ExpressTest.class);

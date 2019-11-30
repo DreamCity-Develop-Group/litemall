@@ -35,8 +35,8 @@ public class WxSwagger2Configuration {
 
     private ApiInfo wxApiInfo() {
         return new ApiInfoBuilder()
-                .title("litemall-wx API")
-                .description("litemall小商场API")
+                .title("MaiTin-wx API")
+                .description("MaiTin小商场API")
                 .termsOfServiceUrl("https://github.com/linlinjava/litemall")
                 .contact("https://github.com/linlinjava/litemall")
                 .version("1.0")

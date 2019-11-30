@@ -35,6 +35,12 @@ public class LitemallUserService {
         return userMapper.selectOneByExample(example);
     }
 
+    public LitemallUser queryByInvite(String invite) {
+        LitemallUserExample example = new LitemallUserExample();
+        example.or().andInviteEqualTo(invite).andDeletedEqualTo(false);
+        return userMapper.selectOneByExample(example);
+    }
+
     public void add(LitemallUser user) {
         user.setAddTime(LocalDateTime.now());
         user.setUpdateTime(LocalDateTime.now());

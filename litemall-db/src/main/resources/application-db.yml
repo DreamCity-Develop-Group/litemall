@@ -23,4 +23,10 @@ spring:
       test-while-idle:  true
       time-between-eviction-runs-millis:  60000
       filters:  stat,wall
+#datasource
+mybatis:
+  type-aliases-package: org.linlinjava.litemall.db.dao
+  mapper-locations: classpath:/org/linlinjava/litemall/db/dao/*.xml
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 

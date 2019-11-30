@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 public class AdminApiApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(AminApiApplication.class, args);
+        SpringApplication.run(AdminApiApplication.class, args);
     }
 
 }

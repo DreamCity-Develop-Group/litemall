@@ -56,6 +56,18 @@
         <javaClientGenerator type="XMLMAPPER" targetPackage="org.linlinjava.litemall.db.dao"
                              targetProject="src/main/java"/>
         <!--表名-->
+        <table tableName="game_rule">
+            <generatedKey column="rule_id" sqlStatement="MySql" identity="true"/>
+        </table>
+        <table tableName="game_rule_item">
+            <generatedKey column="item_id" sqlStatement="MySql" identity="true"/>
+        </table>
+        <table tableName="game_tree">
+            <generatedKey column="tree_id" sqlStatement="MySql" identity="true"/>
+        </table>
+        <table tableName="game_level">
+            <generatedKey column="id" sqlStatement="MySql" identity="true"/>
+        </table>
         <table tableName="litemall_ad">
             <generatedKey column="id" sqlStatement="MySql" identity="true"/>
         </table>

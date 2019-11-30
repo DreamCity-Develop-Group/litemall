@@ -8,6 +8,14 @@ export function fetchList(query) {
   })
 }
 
+export function listLevel(query) {
+  return request({
+    url: '/level/list',
+    method: 'get',
+    params: query
+  })
+}
+
 export function listAddress(query) {
   return request({
     url: '/address/list',
