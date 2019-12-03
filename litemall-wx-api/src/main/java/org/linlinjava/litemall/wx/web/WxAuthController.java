@@ -338,7 +338,7 @@ public class WxAuthController {
              * 1、首先是上级玩家
              * 2、然后是上上级玩家至上N级玩家
              *
-             */
+
             GameRuleItem ruleItem = gameRuleService.getRuleItemByFlag(PlAYER_FLAG);
             List<GameRule> rules = gameRuleService.getRulesByItem(ruleItem.getItemId());
             Map<Integer, GameTree> parents;
@@ -370,7 +370,7 @@ public class WxAuthController {
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-            }
+            }*/
         }
         // 给新用户发送注册优惠券
         couponAssignService.assignForRegister(user.getId());
@@ -549,7 +549,7 @@ public class WxAuthController {
                  * 1、首先是上级玩家
                  * 2、然后是上上级玩家至上N级玩家
                  *
-                 */
+
                 GameRuleItem ruleItem = gameRuleService.getRuleItemByFlag(PlAYER_FLAG);
                 List<GameRule> rules = gameRuleService.getRulesByItem(ruleItem.getItemId());
                 Map<Integer, GameTree> parents;
@@ -581,7 +581,7 @@ public class WxAuthController {
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
-                }
+                }*/
             }
 
 
