@@ -69,6 +69,7 @@ Page({
       info_arr = scene.split(',');
       let _type = info_arr[0];
       let id = info_arr[1];
+      console.log("Type:"+_type,"Id:"+id);
 
       if (_type == 'goods') {
         wx.navigateTo({

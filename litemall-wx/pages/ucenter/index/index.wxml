@@ -26,7 +26,7 @@
       <view class='user_column_item' bindtap='goOrderIndex' data-index='3' data-route='/pages/ucenter/order/order'>
         <text class="user_column_item_badge" wx:if="{{order.unrecv != 0}}">{{order.unrecv}}</text>
         <image class='user_column_item_image' src='/static/images/receive.png'></image>
-        <view class='user_column_item_text'>待收货</view>
+        <view class='user_column_item_text'>今日收益</view>
       </view>
       <view class='user_column_item' bindtap='goOrderIndex' data-index='4' data-route='/pages/ucenter/order/order'>
         <text class="user_column_item_badge" wx:if="{{order.uncomment != 0}}">{{order.uncomment}}</text>

@@ -195,7 +195,8 @@ public class WxGoodsController {
 		}
 
 		//商品分享图片地址
-		data.put("shareImage", info.getShareUrl());
+		String url = org.apache.commons.lang3.StringUtils.isEmpty(info.getShareUrl())?info.getPicUrl():info.getShareUrl();
+		data.put("shareImage", url);
 		return ResponseUtil.ok(data);
 	}
 

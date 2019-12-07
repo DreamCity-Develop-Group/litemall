@@ -6,7 +6,7 @@ var user = require('../../utils/user.js');
 
 Page({
   data: {
-    canShare: false,
+    canShare: true,
     id: 0,
     goods: {},
     groupon: [], //该商品支持的团购规格
@@ -29,7 +29,7 @@ Page({
     noCollectImage: '/static/images/icon_collect.png',
     hasCollectImage: '/static/images/icon_collect_checked.png',
     collectImage: '/static/images/icon_collect.png',
-    shareImage: '',
+    shareImage: 'http://yanxuan.nosdn.127.net/1900349493220bfebcc67b2b6466e9f5.jpg',
     isGroupon: false, //标识是否是一个参团购买
     soldout: false,
     canWrite: false, //用户是否获取了保存相册的权限
@@ -38,6 +38,7 @@ Page({
   // 页面分享
   onShareAppMessage: function() {
     let that = this;
+    console.log(this.data.id);
     return {
       title: that.data.goods.name,
       desc: '唯爱与美食不可辜负',
@@ -79,6 +80,7 @@ Page({
   // 保存分享图
   saveShare: function() {
     let that = this;
+    console.log("shareImage:" + that.data.shareImage);
     wx.downloadFile({
       url: that.data.shareImage,
       success: function(res) {
@@ -100,11 +102,13 @@ Page({
             })
           },
           fail: function(res) {
-            console.log('fail')
+            console.log(res);
+            console.log('fail:保存分享图')
           }
         })
       },
-      fail: function() {
+      fail: function(e) {
+        console.log(e);
         console.log('fail')
       }
     })
@@ -133,6 +137,7 @@ Page({
     util.request(api.GoodsDetail, {
       id: that.data.id
     }).then(function(res) {
+      console.log("GoodsInfo:",res);
       if (res.errno === 0) {
 
         let _specificationList = res.data.specificationList
@@ -409,6 +414,7 @@ Page({
 
   onLoad: function(options) {
     // 页面初始化 options为页面跳转所带来的参数
+    console.log("Options:" + JSON.stringify(options));
     if (options.id) {
       this.setData({
         id: parseInt(options.id)
@@ -425,7 +431,7 @@ Page({
     let that = this;
     wx.getSetting({
         success: function (res) {
-            console.log(res)
+          console.log("authSetting:",res);
             //不存在相册授权
             if (!res.authSetting['scope.writePhotosAlbum']) {
                 wx.authorize({

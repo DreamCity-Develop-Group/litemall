@@ -38,10 +38,11 @@
 			"current": 22,
 			"list": [
 				{
-					"id": -1,
+					"id": 0,
 					"name": "首页",
 					"pathName": "pages/index/index",
-					"query": ""
+					"query": "scene=goods, 1116011",
+					"scene": null
 				},
 				{
 					"id": -1,
@@ -281,11 +282,25 @@
 					"scene": null
 				},
 				{
+					"id": 40,
+					"name": "首页扫码",
+					"pathName": "pages/index/index",
+					"query": "scence=goods,1116011",
+					"scene": 1011
+				},
+				{
 					"id": -1,
 					"name": "pages/index/index",
 					"pathName": "pages/index/index",
-					"query": "id=1181003",
-					"scene": 1047
+					"query": "sence=1",
+					"scene": null
+				},
+				{
+					"id": 42,
+					"name": "朋友圈广告",
+					"pathName": "pages/goods/goods",
+					"query": "scence=goods,1116011",
+					"scene": 1045
 				}
 			]
 		}

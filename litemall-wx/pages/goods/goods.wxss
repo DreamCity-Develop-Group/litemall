@@ -98,7 +98,10 @@
 }
 
 .goods_name_right {
+  position: fixed;
   float: right;
+  right: 0rpx;
+  z-index: 999;
   font-weight: 550;
   margin-top: 28rpx;
   width: 140rpx;
